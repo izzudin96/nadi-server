@@ -44,6 +44,9 @@ func NewRouter(st *store.Store, logger *slog.Logger, cfg config.Config) http.Han
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireUser)
 		r.Get("/api/auth/me", s.handleMe)
+		r.Get("/api/devices", s.handleListDevices)
+		r.Get("/api/devices/{deviceID}/latest", s.handleLatest)
+		r.Get("/api/devices/{deviceID}/metrics/{metricName}", s.handleMetricSeries)
 	})
 
 	return r
