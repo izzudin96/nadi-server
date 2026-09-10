@@ -21,10 +21,12 @@ type Device struct {
 	LastSeenAt   *time.Time
 }
 
-// CreateDevice registers a new device with its hashed API key.
+// CreateDevice registers a new device with its hashed API key, or rotates the
+// key if the device already exists (upsert).
 func (s *Store) CreateDevice(ctx context.Context, deviceID, apiKeyHash string) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO devices (device_id, api_key_hash) VALUES ($1, $2)`,
+		`INSERT INTO devices (device_id, api_key_hash) VALUES ($1, $2)
+		 ON CONFLICT (device_id) DO UPDATE SET api_key_hash = EXCLUDED.api_key_hash`,
 		deviceID, apiKeyHash)
 	return err
 }
