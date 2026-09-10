@@ -1,0 +1,153 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/izzudin96/nadi-server/internal/db"
+)
+
+// testPool creates a fresh nadi_test database, runs migrations, and returns a
+// pool to it. Skips the test if no Postgres is reachable (e.g. plain CI).
+func testPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+
+	adminURL := os.Getenv("TEST_DATABASE_URL")
+	if adminURL == "" {
+		adminURL = "postgres://nadi:nadi@localhost:5432/nadi?sslmode=disable"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	admin, err := pgxpool.New(ctx, adminURL)
+	if err != nil {
+		t.Skipf("no Postgres available: %v", err)
+	}
+	if err := admin.Ping(ctx); err != nil {
+		admin.Close()
+		t.Skipf("no Postgres available: %v", err)
+	}
+
+	if _, err := admin.Exec(ctx, `DROP DATABASE IF EXISTS nadi_test WITH (FORCE)`); err != nil {
+		t.Fatalf("dropping nadi_test: %v", err)
+	}
+	if _, err := admin.Exec(ctx, `CREATE DATABASE nadi_test`); err != nil {
+		t.Fatalf("creating nadi_test: %v", err)
+	}
+	admin.Close()
+
+	testURL := strings.Replace(adminURL, "/nadi?", "/nadi_test?", 1)
+	pool, err := db.Connect(context.Background(), testURL)
+	if err != nil {
+		t.Fatalf("connecting to nadi_test: %v", err)
+	}
+	if err := db.Migrate(context.Background(), pool); err != nil {
+		t.Fatalf("migrating nadi_test: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+func TestCreateAndGetDevice(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	if err := s.CreateDevice(ctx, "dev-1", "hash1"); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+
+	d, err := s.GetDevice(ctx, "dev-1")
+	if err != nil {
+		t.Fatalf("GetDevice() error = %v", err)
+	}
+	if d.DeviceID != "dev-1" || d.APIKeyHash != "hash1" {
+		t.Fatalf("device = %+v", d)
+	}
+}
+
+func TestGetDeviceNotFound(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+
+	if _, err := s.GetDevice(context.Background(), "missing"); err != ErrNotFound {
+		t.Fatalf("GetDevice() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUpdateDeviceSeen(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	if err := s.CreateDevice(ctx, "dev-1", "hash"); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := time.Now().UTC().Truncate(time.Microsecond)
+	if err := s.UpdateDeviceSeen(ctx, "dev-1", "turn-01", "linux", "amd64", "0.1.0", ts); err != nil {
+		t.Fatalf("UpdateDeviceSeen() error = %v", err)
+	}
+
+	d, err := s.GetDevice(ctx, "dev-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Hostname != "turn-01" || d.OS != "linux" || d.Arch != "amd64" || d.AgentVersion != "0.1.0" {
+		t.Fatalf("device metadata = %+v", d)
+	}
+	if d.LastSeenAt == nil || !d.LastSeenAt.Equal(ts) {
+		t.Fatalf("last_seen_at = %v, want %v", d.LastSeenAt, ts)
+	}
+}
+
+func TestInsertMetrics(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	if err := s.CreateDevice(ctx, "dev-1", "hash"); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := time.Now().UTC().Truncate(time.Microsecond)
+	metrics := []Metric{
+		{Name: "cpu.usage_percent", Value: 42.5, Unit: "%"},
+		{Name: "memory.used_bytes", Value: 1024, Unit: "bytes"},
+	}
+	if err := s.InsertMetrics(ctx, "dev-1", metrics, ts); err != nil {
+		t.Fatalf("InsertMetrics() error = %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM metrics`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("metric count = %d, want 2", count)
+	}
+}
+
+func TestInsertMetricsRejectsUnknownDevice(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	// device_id has a FK to devices; inserting for an unknown device must fail.
+	err := s.InsertMetrics(ctx, "nope", []Metric{{Name: "cpu.usage_percent", Value: 1}}, time.Now())
+	if err == nil {
+		t.Fatal("expected FK violation for unknown device")
+	}
+}
+
+func ExampleNew() {
+	fmt.Println("store.New wraps a *pgxpool.Pool")
+	// Output: store.New wraps a *pgxpool.Pool
+}
