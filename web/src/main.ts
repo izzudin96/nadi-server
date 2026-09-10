@@ -8,7 +8,9 @@ import './style.css'
 const app = createApp(App)
 const pinia = createPinia()
 app.use(pinia)
-app.use(router)
 
 const auth = useAuthStore(pinia)
-auth.bootstrap().then(() => app.mount('#app'))
+auth.bootstrap().finally(() => {
+  app.use(router)
+  app.mount('#app')
+})
