@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/izzudin96/nadi-server/internal/auth"
+	"github.com/izzudin96/nadi-server/internal/config"
 	"github.com/izzudin96/nadi-server/internal/store"
 	"github.com/izzudin96/nadi-server/internal/testdb"
 )
@@ -22,7 +23,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *store.Store, *pgxpool.Pool)
 	pool := testdb.New(t)
 	st := store.New(pool)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(NewRouter(st, logger))
+	srv := httptest.NewServer(NewRouter(st, logger, config.Config{JWTSecret: "test-secret"}))
 	t.Cleanup(srv.Close)
 	return srv, st, pool
 }

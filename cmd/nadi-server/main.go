@@ -52,7 +52,7 @@ func run() error {
 		return err
 	}
 
-	mux := api.NewRouter(store.New(pool), logger)
+	mux := api.NewRouter(store.New(pool), logger, cfg)
 
 	logger.Info("server starting", "addr", cfg.Addr, "version", version)
 	return http.ListenAndServe(cfg.Addr, mux)

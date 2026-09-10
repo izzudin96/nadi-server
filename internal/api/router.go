@@ -8,24 +8,44 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/izzudin96/nadi-server/internal/config"
 	"github.com/izzudin96/nadi-server/internal/store"
 )
 
 // Server holds the dependencies the HTTP handlers need.
 type Server struct {
-	store  *store.Store
-	logger *slog.Logger
+	store        *store.Store
+	logger       *slog.Logger
+	jwtSecret    string
+	tokenTTL     time.Duration
+	cookieSecure bool
 }
 
 // NewRouter wires the HTTP routes. The device-key auth lives inside the
 // heartbeat handler (not middleware) because the device_id used to look up the
 // key comes from the request body, not a header.
-func NewRouter(st *store.Store, logger *slog.Logger) http.Handler {
-	s := &Server{store: st, logger: logger}
+func NewRouter(st *store.Store, logger *slog.Logger, cfg config.Config) http.Handler {
+	s := &Server{
+		store:        st,
+		logger:       logger,
+		jwtSecret:    cfg.JWTSecret,
+		tokenTTL:     24 * time.Hour,
+		cookieSecure: cfg.CookieSecure,
+	}
 
 	r := chi.NewRouter()
 	r.Get("/healthz", s.handleHealthz)
 	r.Post("/api/heartbeat", s.handleHeartbeat)
+
+	r.Post("/api/auth/register", s.handleRegister)
+	r.Post("/api/auth/login", s.handleLogin)
+	r.Post("/api/auth/logout", s.handleLogout)
+
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireUser)
+		r.Get("/api/auth/me", s.handleMe)
+	})
+
 	return r
 }
 
