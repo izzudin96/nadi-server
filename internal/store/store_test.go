@@ -3,60 +3,14 @@ package store
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/izzudin96/nadi-server/internal/db"
+	"github.com/izzudin96/nadi-server/internal/testdb"
 )
 
-// testPool creates a fresh nadi_test database, runs migrations, and returns a
-// pool to it. Skips the test if no Postgres is reachable (e.g. plain CI).
-func testPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-
-	adminURL := os.Getenv("TEST_DATABASE_URL")
-	if adminURL == "" {
-		adminURL = "postgres://nadi:nadi@localhost:5432/nadi?sslmode=disable"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	admin, err := pgxpool.New(ctx, adminURL)
-	if err != nil {
-		t.Skipf("no Postgres available: %v", err)
-	}
-	if err := admin.Ping(ctx); err != nil {
-		admin.Close()
-		t.Skipf("no Postgres available: %v", err)
-	}
-
-	if _, err := admin.Exec(ctx, `DROP DATABASE IF EXISTS nadi_test WITH (FORCE)`); err != nil {
-		t.Fatalf("dropping nadi_test: %v", err)
-	}
-	if _, err := admin.Exec(ctx, `CREATE DATABASE nadi_test`); err != nil {
-		t.Fatalf("creating nadi_test: %v", err)
-	}
-	admin.Close()
-
-	testURL := strings.Replace(adminURL, "/nadi?", "/nadi_test?", 1)
-	pool, err := db.Connect(context.Background(), testURL)
-	if err != nil {
-		t.Fatalf("connecting to nadi_test: %v", err)
-	}
-	if err := db.Migrate(context.Background(), pool); err != nil {
-		t.Fatalf("migrating nadi_test: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
 func TestCreateAndGetDevice(t *testing.T) {
-	pool := testPool(t)
+	pool := testdb.New(t)
 	s := New(pool)
 	ctx := context.Background()
 
@@ -74,7 +28,7 @@ func TestCreateAndGetDevice(t *testing.T) {
 }
 
 func TestGetDeviceNotFound(t *testing.T) {
-	pool := testPool(t)
+	pool := testdb.New(t)
 	s := New(pool)
 
 	if _, err := s.GetDevice(context.Background(), "missing"); err != ErrNotFound {
@@ -83,7 +37,7 @@ func TestGetDeviceNotFound(t *testing.T) {
 }
 
 func TestUpdateDeviceSeen(t *testing.T) {
-	pool := testPool(t)
+	pool := testdb.New(t)
 	s := New(pool)
 	ctx := context.Background()
 
@@ -109,7 +63,7 @@ func TestUpdateDeviceSeen(t *testing.T) {
 }
 
 func TestInsertMetrics(t *testing.T) {
-	pool := testPool(t)
+	pool := testdb.New(t)
 	s := New(pool)
 	ctx := context.Background()
 
@@ -136,7 +90,7 @@ func TestInsertMetrics(t *testing.T) {
 }
 
 func TestInsertMetricsRejectsUnknownDevice(t *testing.T) {
-	pool := testPool(t)
+	pool := testdb.New(t)
 	s := New(pool)
 	ctx := context.Background()
 
