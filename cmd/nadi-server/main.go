@@ -32,6 +32,10 @@ func run() error {
 	}
 	defer pool.Close()
 
+	if err := db.Migrate(context.Background(), pool); err != nil {
+		return err
+	}
+
 	mux := chi.NewRouter()
 	mux.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
