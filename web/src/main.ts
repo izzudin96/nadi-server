@@ -1,3 +1,4 @@
+import '@fontsource-variable/geist'
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 import App from './App.vue'
