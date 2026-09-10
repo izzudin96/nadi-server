@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/izzudin96/nadi-server/internal/config"
 	"github.com/izzudin96/nadi-server/internal/store"
+	"github.com/izzudin96/nadi-server/internal/webui"
 )
 
 // Server holds the dependencies the HTTP handlers need.
@@ -48,6 +50,15 @@ func NewRouter(st *store.Store, logger *slog.Logger, cfg config.Config) http.Han
 		r.Get("/api/devices/{deviceID}/latest", s.handleLatest)
 		r.Get("/api/devices/{deviceID}/metrics/{metricName}", s.handleMetricSeries)
 	})
+
+	// Serve the embedded dashboard if it has been built (make web). In dev the
+	// Vite server proxies /api here, so the SPA is only served from this binary
+	// in production.
+	if fsys, err := webui.FS(); err == nil {
+		if _, err := fs.Stat(fsys, "index.html"); err == nil {
+			r.NotFound(spaHandler(fsys))
+		}
+	}
 
 	return r
 }
