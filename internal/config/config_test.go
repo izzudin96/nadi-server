@@ -30,8 +30,30 @@ func TestLoadAllowRegistrationDefault(t *testing.T) {
 	}
 }
 
+func TestLoadRetentionDaysDefault(t *testing.T) {
+	os.Unsetenv("NADI_RETENTION_DAYS")
+	if cfg := Load(); cfg.RetentionDays != 30 {
+		t.Errorf("RetentionDays = %d, want 30", cfg.RetentionDays)
+	}
+}
+
+func TestLoadRetentionDaysFromEnv(t *testing.T) {
+	os.Setenv("NADI_RETENTION_DAYS", "7")
+	defer os.Unsetenv("NADI_RETENTION_DAYS")
+	if cfg := Load(); cfg.RetentionDays != 7 {
+		t.Errorf("RetentionDays = %d, want 7", cfg.RetentionDays)
+	}
+}
+
+func TestValidateRejectsNonPositiveRetentionDays(t *testing.T) {
+	cfg := Config{JWTSecret: "strong", AllowRegistration: "auto", RetentionDays: 0}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for RetentionDays <= 0")
+	}
+}
+
 func TestValidateRejectsDefaultSecretInProduction(t *testing.T) {
-	cfg := Config{JWTSecret: defaultJWTSecret, CookieSecure: true, AllowRegistration: "auto"}
+	cfg := Config{JWTSecret: defaultJWTSecret, CookieSecure: true, AllowRegistration: "auto", RetentionDays: 30}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for default JWT secret with secure cookies")
 	}
@@ -43,7 +65,7 @@ func TestValidateRejectsDefaultSecretInProduction(t *testing.T) {
 }
 
 func TestValidateRejectsBadRegistrationPolicy(t *testing.T) {
-	cfg := Config{JWTSecret: "strong", AllowRegistration: "sometimes"}
+	cfg := Config{JWTSecret: "strong", AllowRegistration: "sometimes", RetentionDays: 30}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for invalid NADI_ALLOW_REGISTRATION")
 	}

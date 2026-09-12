@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -67,10 +68,50 @@ func run() error {
 		return err
 	}
 
-	mux := api.NewRouter(store.New(pool), logger, cfg)
+	st := store.New(pool)
+	mux := api.NewRouter(st, logger, cfg)
+
+	go runRetention(context.Background(), st, cfg.RetentionDays, logger)
 
 	logger.Info("server starting", "addr", cfg.Addr, "version", version)
 	return http.ListenAndServe(cfg.Addr, mux)
+}
+
+// retentionInterval is how often the retention job scans for expired samples.
+const retentionInterval = time.Hour
+
+// runRetention periodically deletes metric samples older than the configured
+// retention window so the metrics table cannot grow without bound. It purges
+// once at startup so a freshly configured window takes effect immediately.
+func runRetention(ctx context.Context, st *store.Store, days int, logger *slog.Logger) {
+	if days <= 0 {
+		logger.Info("retention disabled", "retention_days", days)
+		return
+	}
+
+	purge := func() {
+		cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+		deleted, err := st.PurgeMetrics(ctx, cutoff)
+		if err != nil {
+			logger.Error("retention purge failed", "err", err)
+			return
+		}
+		if deleted > 0 {
+			logger.Info("retention purge complete", "deleted", deleted, "older_than", cutoff)
+		}
+	}
+
+	purge()
+	ticker := time.NewTicker(retentionInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			purge()
+		}
+	}
 }
 
 // registerDevice creates (or re-keys) a device and prints its API key. Used to

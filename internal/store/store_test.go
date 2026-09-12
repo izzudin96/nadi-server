@@ -101,6 +101,42 @@ func TestInsertMetricsRejectsUnknownDevice(t *testing.T) {
 	}
 }
 
+func TestPurgeMetrics(t *testing.T) {
+	pool := testdb.New(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	if err := s.CreateDevice(ctx, "dev-1", "hash"); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	old := []Metric{{Name: "cpu.usage_percent", Value: 1, Unit: "%"}}
+	recent := []Metric{{Name: "cpu.usage_percent", Value: 2, Unit: "%"}}
+	if err := s.InsertMetrics(ctx, "dev-1", old, now.Add(-48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertMetrics(ctx, "dev-1", recent, now); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := s.PurgeMetrics(ctx, now.Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("PurgeMetrics() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM metrics`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("metric count after purge = %d, want 1", count)
+	}
+}
+
 func ExampleNew() {
 	fmt.Println("store.New wraps a *pgxpool.Pool")
 	// Output: store.New wraps a *pgxpool.Pool

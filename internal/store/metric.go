@@ -31,3 +31,14 @@ func (s *Store) InsertMetrics(ctx context.Context, deviceID string, metrics []Me
 	}
 	return tx.Commit(ctx)
 }
+
+// PurgeMetrics deletes metric samples older than olderThan and returns how many
+// rows were removed. Backing the retention policy, the server calls this on an
+// interval (see cmd/nadi-server).
+func (s *Store) PurgeMetrics(ctx context.Context, olderThan time.Time) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM metrics WHERE ts < $1`, olderThan)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}

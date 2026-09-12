@@ -15,18 +15,24 @@ const route = useRoute()
 const router = useRouter()
 const deviceID = route.params.id as string
 
+const REFRESH_MS = 15000
+
 const metrics = ref<LatestMetric[]>([])
 const selected = ref<string | null>(null)
 const loading = ref(true)
 const error = ref('')
 const chartEl = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
+let timer: number | undefined
+let polling = false
 
 onMounted(async () => {
   await loadLatest()
   window.addEventListener('resize', resizeChart)
+  timer = window.setInterval(poll, REFRESH_MS)
 })
 onBeforeUnmount(() => {
+  if (timer !== undefined) window.clearInterval(timer)
   window.removeEventListener('resize', resizeChart)
   chart?.dispose()
 })
@@ -35,29 +41,48 @@ function resizeChart() {
   chart?.resize()
 }
 
-async function loadLatest() {
-  loading.value = true
-  error.value = ''
+// poll refreshes the cards and chart in the background; it never flashes the
+// skeleton or surfaces transient errors, so the page stays stable while live.
+async function poll() {
+  if (polling) return
+  polling = true
+  try {
+    await loadLatest(true)
+  } finally {
+    polling = false
+  }
+}
+
+async function loadLatest(silent = false) {
+  if (!silent) loading.value = true
   try {
     const res = await api.latest(deviceID)
     metrics.value = res.metrics
-    if (metrics.value.length && !selected.value) {
-      await select(metrics.value[0].name)
+    error.value = ''
+    if (!selected.value) {
+      if (metrics.value.length) selected.value = metrics.value[0].name
     }
+    await loadSeries()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load metrics'
+    if (!silent) error.value = e instanceof Error ? e.message : 'Failed to load metrics'
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
 async function select(name: string) {
   selected.value = name
+  await loadSeries()
+}
+
+async function loadSeries() {
+  if (!selected.value) return
   const to = new Date()
   const from = new Date(to.getTime() - 60 * 60 * 1000)
   try {
-    const res = await api.series(deviceID, name, from.toISOString(), to.toISOString())
-    renderChart(name, res.points)
+    const res = await api.series(deviceID, selected.value, from.toISOString(), to.toISOString())
+    renderChart(selected.value, res.points)
+    error.value = ''
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load series'
   }
@@ -134,7 +159,17 @@ function fmt(m: LatestMetric): string {
     </div>
 
     <template v-else-if="metrics.length">
-      <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      <Card class="mb-6">
+        <CardHeader>
+          <CardTitle>{{ selected }}</CardTitle>
+          <CardDescription>Last 60 minutes</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div ref="chartEl" class="h-96 w-full"></div>
+        </CardContent>
+      </Card>
+
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <button
           v-for="m in metrics"
           :key="m.name"
@@ -154,16 +189,6 @@ function fmt(m: LatestMetric): string {
           </div>
         </button>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{{ selected }}</CardTitle>
-          <CardDescription>Last 60 minutes</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div ref="chartEl" class="h-96 w-full"></div>
-        </CardContent>
-      </Card>
     </template>
 
     <Card v-else class="py-16">

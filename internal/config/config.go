@@ -4,9 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 )
 
-const defaultJWTSecret = "dev-secret-change-me"
+const (
+	defaultJWTSecret     = "dev-secret-change-me"
+	defaultRetentionDays = 30
+)
 
 // Config holds server settings, loaded from environment variables (12-factor)
 // with dev-friendly defaults that match docker-compose.yml.
@@ -20,6 +24,9 @@ type Config struct {
 	//   "true"  — always open
 	//   "false" — always closed (manage users with -create-user)
 	AllowRegistration string
+	// RetentionDays is how many days of metric history to keep. The server's
+	// retention job deletes older samples on an interval.
+	RetentionDays int
 }
 
 func Load() Config {
@@ -29,6 +36,7 @@ func Load() Config {
 		JWTSecret:         getenv("JWT_SECRET", defaultJWTSecret),
 		CookieSecure:      getenv("NADI_SECURE_COOKIES", "false") == "true",
 		AllowRegistration: getenv("NADI_ALLOW_REGISTRATION", "auto"),
+		RetentionDays:     getenvInt("NADI_RETENTION_DAYS", defaultRetentionDays),
 	}
 }
 
@@ -43,6 +51,9 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("NADI_ALLOW_REGISTRATION must be one of auto|true|false, got %q", c.AllowRegistration)
 	}
+	if c.RetentionDays <= 0 {
+		return errors.New("NADI_RETENTION_DAYS must be a positive number of days")
+	}
 	return nil
 }
 
@@ -51,4 +62,16 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getenvInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
 }
