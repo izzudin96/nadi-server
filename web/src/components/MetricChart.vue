@@ -1,17 +1,25 @@
 <script setup lang="ts">
 import * as echarts from 'echarts'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '@/api/client'
 import type { Point } from '@/api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   deviceId: string
   metricName: string
   unit?: string
-}>()
+  rangeSeconds?: number
+}>(), {
+  unit: '',
+  rangeSeconds: 3600,
+})
 
-const REFRESH_MS = 15000
+// Live-refresh the last hour quickly; longer windows are mostly history so a
+// slower poll keeps them current without the request churn.
+const SHORT_RANGE_POLL_MS = 15000
+const LONG_RANGE_POLL_MS = 300000
+const LONG_RANGE_SECONDS = 3600
 
 const chartEl = ref<HTMLDivElement | null>(null)
 const latest = ref<number | null>(null)
@@ -21,14 +29,33 @@ let polling = false
 
 onMounted(async () => {
   window.addEventListener('resize', resize)
+  setupTimer()
   await load()
-  timer = window.setInterval(poll, REFRESH_MS)
 })
 onBeforeUnmount(() => {
-  if (timer !== undefined) window.clearInterval(timer)
+  clearTimer()
   window.removeEventListener('resize', resize)
   chart?.dispose()
 })
+
+watch(
+  () => props.rangeSeconds,
+  () => {
+    clearTimer()
+    setupTimer()
+    load()
+  },
+)
+
+function setupTimer() {
+  const interval = props.rangeSeconds <= LONG_RANGE_SECONDS ? SHORT_RANGE_POLL_MS : LONG_RANGE_POLL_MS
+  timer = window.setInterval(poll, interval)
+}
+
+function clearTimer() {
+  if (timer !== undefined) window.clearInterval(timer)
+  timer = undefined
+}
 
 function resize() {
   chart?.resize()
@@ -46,7 +73,7 @@ async function poll() {
 
 async function load() {
   const to = new Date()
-  const from = new Date(to.getTime() - 60 * 60 * 1000)
+  const from = new Date(to.getTime() - props.rangeSeconds * 1000)
   try {
     const res = await api.series(props.deviceId, props.metricName, from.toISOString(), to.toISOString())
     render(res.points)
