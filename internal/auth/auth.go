@@ -1,6 +1,21 @@
 package auth
 
-import "golang.org/x/crypto/bcrypt"
+import (
+	"crypto/rand"
+	"encoding/hex"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+// GenerateAPIKey returns a cryptographically random device API key (48 hex
+// characters). It is shown to the operator once; only its bcrypt hash is stored.
+func GenerateAPIKey() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
 
 // HashSecret returns a bcrypt hash of a secret (a device API key or a user
 // password). Secrets are never stored in plaintext.

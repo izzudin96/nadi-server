@@ -16,6 +16,14 @@ type User struct {
 	CreatedAt    time.Time
 }
 
+// CountUsers returns the number of dashboard users. Used to decide whether the
+// first-run registration window is still open.
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
+	return n, err
+}
+
 // CreateUser inserts a user and returns its id.
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (int64, error) {
 	var id int64

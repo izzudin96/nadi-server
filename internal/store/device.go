@@ -31,6 +31,33 @@ func (s *Store) CreateDevice(ctx context.Context, deviceID, apiKeyHash string) e
 	return err
 }
 
+// RotateDeviceKey replaces a device's API key hash. Returns ErrNotFound if the
+// device does not exist.
+func (s *Store) RotateDeviceKey(ctx context.Context, deviceID, apiKeyHash string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE devices SET api_key_hash = $2 WHERE device_id = $1`, deviceID, apiKeyHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteDevice removes a device and (via ON DELETE CASCADE) its metrics.
+// Returns ErrNotFound if the device does not exist.
+func (s *Store) DeleteDevice(ctx context.Context, deviceID string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM devices WHERE device_id = $1`, deviceID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // GetDevice looks up a device by its stable id. Returns ErrNotFound if unknown.
 func (s *Store) GetDevice(ctx context.Context, deviceID string) (*Device, error) {
 	var d Device

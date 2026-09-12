@@ -23,6 +23,32 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadAllowRegistrationDefault(t *testing.T) {
+	os.Unsetenv("NADI_ALLOW_REGISTRATION")
+	if cfg := Load(); cfg.AllowRegistration != "auto" {
+		t.Errorf("AllowRegistration = %q, want auto", cfg.AllowRegistration)
+	}
+}
+
+func TestValidateRejectsDefaultSecretInProduction(t *testing.T) {
+	cfg := Config{JWTSecret: defaultJWTSecret, CookieSecure: true, AllowRegistration: "auto"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for default JWT secret with secure cookies")
+	}
+
+	cfg.JWTSecret = "a-strong-secret"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestValidateRejectsBadRegistrationPolicy(t *testing.T) {
+	cfg := Config{JWTSecret: "strong", AllowRegistration: "sometimes"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for invalid NADI_ALLOW_REGISTRATION")
+	}
+}
+
 func TestLoadFromEnv(t *testing.T) {
 	os.Setenv("NADI_ADDR", ":9999")
 	os.Setenv("DATABASE_URL", "postgres://example")

@@ -9,6 +9,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/izzudin96/nadi-server/internal/api"
 	"github.com/izzudin96/nadi-server/internal/auth"
@@ -21,12 +24,21 @@ var version = "dev"
 
 func main() {
 	createDevice := flag.String("create-device", "", "register a device with this device_id, print its api key, then exit")
+	createUser := flag.String("create-user", "", "create a dashboard user with this email, print its password, then exit")
 	apiKey := flag.String("api-key", "", "api key to use with -create-device (a random one is generated if empty)")
+	password := flag.String("password", "", "password to use with -create-user (a random one is generated if empty)")
 	flag.Parse()
 
 	if *createDevice != "" {
 		if err := registerDevice(*createDevice, *apiKey); err != nil {
 			slog.Error("registering device", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *createUser != "" {
+		if err := createDashboardUser(*createUser, *password); err != nil {
+			slog.Error("creating user", "err", err)
 			os.Exit(1)
 		}
 		return
@@ -40,6 +52,9 @@ func main() {
 
 func run() error {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	pool, err := db.Connect(context.Background(), cfg.DatabaseURL)
@@ -61,23 +76,16 @@ func run() error {
 // registerDevice creates (or re-keys) a device and prints its API key. Used to
 // bootstrap devices before the dashboard's device management exists.
 func registerDevice(deviceID, apiKey string) error {
-	cfg := config.Load()
-
-	pool, err := db.Connect(context.Background(), cfg.DatabaseURL)
+	pool, err := connectAndMigrate()
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := db.Migrate(context.Background(), pool); err != nil {
-		return err
-	}
 
 	if apiKey == "" {
-		buf := make([]byte, 24)
-		if _, err := rand.Read(buf); err != nil {
+		if apiKey, err = auth.GenerateAPIKey(); err != nil {
 			return err
 		}
-		apiKey = hex.EncodeToString(buf)
 	}
 
 	hash, err := auth.HashSecret(apiKey)
@@ -90,4 +98,59 @@ func registerDevice(deviceID, apiKey string) error {
 
 	fmt.Printf("device_id: %s\napi_key:   %s\n", deviceID, apiKey)
 	return nil
+}
+
+// createDashboardUser creates a dashboard user, bypassing the registration
+// policy. Use it to bootstrap the admin account or to add users after
+// self-service registration has closed.
+func createDashboardUser(email, password string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return fmt.Errorf("email is required")
+	}
+
+	pool, err := connectAndMigrate()
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	generated := password == ""
+	if generated {
+		buf := make([]byte, 12)
+		if _, err := rand.Read(buf); err != nil {
+			return err
+		}
+		password = hex.EncodeToString(buf)
+	}
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+
+	hash, err := auth.HashSecret(password)
+	if err != nil {
+		return err
+	}
+	if _, err := store.New(pool).CreateUser(context.Background(), email, hash); err != nil {
+		return err
+	}
+
+	fmt.Printf("email:    %s\npassword: %s\n", email, password)
+	if generated {
+		fmt.Println("(generated password — save it now; it will not be shown again)")
+	}
+	return nil
+}
+
+func connectAndMigrate() (*pgxpool.Pool, error) {
+	cfg := config.Load()
+	pool, err := db.Connect(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Migrate(context.Background(), pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return pool, nil
 }

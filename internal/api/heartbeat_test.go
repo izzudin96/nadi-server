@@ -20,10 +20,15 @@ import (
 
 func newTestServer(t *testing.T) (*httptest.Server, *store.Store, *pgxpool.Pool) {
 	t.Helper()
+	return newTestServerCfg(t, config.Config{JWTSecret: "test-secret", AllowRegistration: "true"})
+}
+
+func newTestServerCfg(t *testing.T, cfg config.Config) (*httptest.Server, *store.Store, *pgxpool.Pool) {
+	t.Helper()
 	pool := testdb.New(t)
 	st := store.New(pool)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(NewRouter(st, logger, config.Config{JWTSecret: "test-secret"}))
+	srv := httptest.NewServer(NewRouter(st, logger, cfg))
 	t.Cleanup(srv.Close)
 	return srv, st, pool
 }

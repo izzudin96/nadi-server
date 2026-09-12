@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { AlertCircle, Activity, Loader2 } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { api } from '@/api/client'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -24,6 +25,15 @@ const password = ref('')
 const mode = ref('login')
 const error = ref('')
 const loading = ref(false)
+const registrationOpen = ref(false)
+
+onMounted(async () => {
+  try {
+    registrationOpen.value = (await api.registrationStatus()).open
+  } catch {
+    registrationOpen.value = false
+  }
+})
 
 async function submit() {
   error.value = ''
@@ -61,7 +71,7 @@ async function submit() {
         </CardHeader>
         <CardContent>
           <Tabs v-model="mode" class="gap-4">
-            <TabsList class="w-full">
+            <TabsList v-if="registrationOpen" class="w-full">
               <TabsTrigger value="login">Log in</TabsTrigger>
               <TabsTrigger value="register">Register</TabsTrigger>
             </TabsList>

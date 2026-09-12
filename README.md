@@ -25,18 +25,35 @@ cd web && npm install && npm run dev
 
 ### Bootstrap a device
 
-The agent authenticates with a per-device API key. Register a device (prints its key):
+The agent authenticates with a per-device API key. Create a device from the
+dashboard (**Add device**) or via the CLI (prints its key once):
 
 ```sh
 go run ./cmd/nadi-server -create-device my-device
 ```
 
-Then put that `device_id` + `api_key` into the agent's `agent.yaml`.
+Then put that `device_id` + `api_key` into the agent's `agent.yaml`. Keys can be
+rotated and devices deleted from the dashboard row menu.
 
 ### Register a user
 
 Open the dashboard (http://localhost:5173 in dev) and register/login. The
-dashboard is read-only and protected by the JWT cookie.
+dashboard is protected by the JWT cookie.
+
+Registration follows `NADI_ALLOW_REGISTRATION`:
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | Open only until the first user exists, then closed |
+| `true` | Always open |
+| `false` | Always closed |
+
+To add users when registration is closed (or to bootstrap the first one from the
+CLI), generate a password and create the account:
+
+```sh
+go run ./cmd/nadi-server -create-user admin@example.com
+```
 
 ## Configuration (env vars)
 
@@ -46,6 +63,7 @@ dashboard is read-only and protected by the JWT cookie.
 | `DATABASE_URL` | `postgres://nadi:nadi@localhost:5432/nadi?sslmode=disable` | Postgres DSN |
 | `JWT_SECRET` | `dev-secret-change-me` | HMAC key for dashboard JWTs (set in prod) |
 | `NADI_SECURE_COOKIES` | `false` | set `true` behind HTTPS |
+| `NADI_ALLOW_REGISTRATION` | `auto` | `auto` \| `true` \| `false` (see above) |
 
 ## Build (production)
 
@@ -53,6 +71,9 @@ dashboard is read-only and protected by the JWT cookie.
 make build-full    # npm build + embed dashboard + go build
 make build-linux   # cross-compiled amd64 binary (no CGO)
 ```
+
+For a production deploy (Docker + Postgres + TLS + admin/device bootstrap), see
+[`deploy/README.md`](deploy/README.md).
 
 ## Test
 

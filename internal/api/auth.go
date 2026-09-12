@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,7 +20,46 @@ type credentials struct {
 	Password string `json:"password"`
 }
 
+// registrationOpen reports whether self-service signup is currently allowed.
+// The "auto" policy opens registration only until the first user exists, which
+// closes the door after the admin bootstraps their account.
+func (s *Server) registrationOpen(ctx context.Context) (bool, error) {
+	switch s.allowRegistration {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default: // "auto" and the zero value
+		n, err := s.store.CountUsers(ctx)
+		if err != nil {
+			return false, err
+		}
+		return n == 0, nil
+	}
+}
+
+func (s *Server) handleRegistrationStatus(w http.ResponseWriter, r *http.Request) {
+	open, err := s.registrationOpen(r.Context())
+	if err != nil {
+		s.logger.Error("checking registration status", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"open": open})
+}
+
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	open, err := s.registrationOpen(r.Context())
+	if err != nil {
+		s.logger.Error("checking registration status", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !open {
+		http.Error(w, "registration is disabled", http.StatusForbidden)
+		return
+	}
+
 	var c credentials
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)

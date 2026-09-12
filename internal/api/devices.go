@@ -1,10 +1,17 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/izzudin96/nadi-server/internal/auth"
+	"github.com/izzudin96/nadi-server/internal/store"
 )
 
 // onlineThreshold is how long since a heartbeat a device is still "online".
@@ -46,6 +53,105 @@ func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"devices": views})
+}
+
+// deviceIDRe constrains dashboard-created device ids. Existing agents may use
+// looser ids; the heartbeat path stays permissive for backward compatibility.
+var deviceIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+type createDeviceRequest struct {
+	DeviceID string `json:"device_id"`
+}
+
+type deviceKeyView struct {
+	DeviceID string `json:"device_id"`
+	APIKey   string `json:"api_key"`
+}
+
+// handleCreateDevice registers a device and returns its API key once. The key
+// is never retrievable again (only its hash is stored).
+func (s *Server) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
+	var req createDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	deviceID := strings.TrimSpace(req.DeviceID)
+	if !deviceIDRe.MatchString(deviceID) {
+		http.Error(w, "device_id must be 1-64 chars of letters, digits, dot, dash or underscore", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := s.store.GetDevice(r.Context(), deviceID); err == nil {
+		http.Error(w, "device already exists", http.StatusConflict)
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		s.logger.Error("checking device", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	key, hash, err := newDeviceKey()
+	if err != nil {
+		s.logger.Error("generating device key", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.CreateDevice(r.Context(), deviceID, hash); err != nil {
+		s.logger.Error("creating device", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, deviceKeyView{DeviceID: deviceID, APIKey: key})
+}
+
+// handleRotateDevice issues a fresh API key for an existing device.
+func (s *Server) handleRotateDevice(w http.ResponseWriter, r *http.Request) {
+	deviceID := chi.URLParam(r, "deviceID")
+
+	key, hash, err := newDeviceKey()
+	if err != nil {
+		s.logger.Error("generating device key", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.RotateDeviceKey(r.Context(), deviceID, hash); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "device not found", http.StatusNotFound)
+			return
+		}
+		s.logger.Error("rotating device key", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, deviceKeyView{DeviceID: deviceID, APIKey: key})
+}
+
+// handleDeleteDevice removes a device and its stored metrics.
+func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
+	deviceID := chi.URLParam(r, "deviceID")
+	if err := s.store.DeleteDevice(r.Context(), deviceID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "device not found", http.StatusNotFound)
+			return
+		}
+		s.logger.Error("deleting device", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func newDeviceKey() (key, hash string, err error) {
+	key, err = auth.GenerateAPIKey()
+	if err != nil {
+		return "", "", err
+	}
+	hash, err = auth.HashSecret(key)
+	if err != nil {
+		return "", "", err
+	}
+	return key, hash, nil
 }
 
 func (s *Server) handleLatest(w http.ResponseWriter, r *http.Request) {
