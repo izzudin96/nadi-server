@@ -110,6 +110,56 @@ docker compose -f deploy/docker-compose.yml logs -f server
 
 The device should appear as **Online** in the dashboard within one interval.
 
+## Dokploy / external Postgres
+
+When a Postgres instance already exists (e.g. shared on Dokploy), deploy the
+repo as a Dokploy **Application** (build from the `Dockerfile`) and skip the
+compose stack. The compose file is only for the self-contained case.
+
+1. **Create a dedicated database and role.** Do not reuse a shared database —
+   the tables (`users`, `devices`, `metrics`) have generic names and will
+   collide. Run as the Postgres superuser:
+
+   ```sql
+   CREATE ROLE nadi LOGIN PASSWORD 'a-strong-password';
+   CREATE DATABASE nadi OWNER nadi;
+   ```
+
+   The server runs its migrations on startup and needs `CREATE` privileges in
+   the database; a database owner has them.
+
+2. **Set the application environment:**
+
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | `postgres://nadi:<password>@<db-host>:5432/nadi?sslmode=disable&pool_max_conns=10` |
+   | `JWT_SECRET` | output of `openssl rand -hex 32` |
+   | `NADI_SECURE_COOKIES` | `true` |
+   | `NADI_ALLOW_REGISTRATION` | `auto` (or `false`) |
+
+   Use the Postgres service's **internal hostname** (not `localhost`). If the
+   database is on another host, use `sslmode=require` (or `verify-full`) instead
+   of `disable`. `pool_max_conns` keeps nadi a well-behaved neighbor on a shared
+   database.
+
+3. **Networking:** attach the app to the same Docker network as Postgres. On
+   Dokploy this usually means the shared network for the database service.
+
+4. **Routing/TLS:** expose container port `8080`; set the health check path to
+   `/healthz`. Enable HTTPS on the domain — with `NADI_SECURE_COOKIES=true`
+   the login cookie is only sent over TLS, so plain HTTP silently fails to log
+   in. The image also ships a `HEALTHCHECK` against `/healthz`.
+
+5. **Bootstrap** from the Dokploy container terminal:
+
+   ```sh
+   nadi-server -create-user admin@example.com
+   nadi-server -create-device turn-01
+   ```
+
+6. **Keep it to a single replica.** Migrations run on every startup with no
+   locking, so concurrent replicas can race.
+
 ## Operations
 
 - **Backups:** the data lives in the `pgdata` volume. `pg_dump` it on a schedule.
