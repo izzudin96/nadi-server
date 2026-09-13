@@ -19,7 +19,11 @@ import (
 const onlineThreshold = 2 * time.Minute
 
 const defaultSeriesWindow = time.Hour
-const defaultSeriesLimit = 1000
+
+// targetSeriesPoints is how many points a downsampled series aims for. The
+// series stride is derived from the requested window so every range returns a
+// bounded, chart-friendly number of points.
+const targetSeriesPoints = 600
 
 type deviceView struct {
 	DeviceID     string     `json:"device_id"`
@@ -173,8 +177,19 @@ func (s *Server) handleMetricSeries(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	from := parseTime(r.URL.Query().Get("from"), now.Add(-defaultSeriesWindow))
 	to := parseTime(r.URL.Query().Get("to"), now)
+	if !to.After(from) {
+		http.Error(w, "to must be after from", http.StatusBadRequest)
+		return
+	}
 
-	points, err := s.store.MetricSeries(r.Context(), deviceID, metricName, from, to, defaultSeriesLimit)
+	// Downsample to a bounded number of points; for short windows the stride
+	// falls below the heartbeat interval so the series is effectively raw.
+	stride := to.Sub(from) / targetSeriesPoints
+	if stride < time.Second {
+		stride = time.Second
+	}
+
+	points, err := s.store.MetricSeriesBucketed(r.Context(), deviceID, metricName, from, to, stride)
 	if err != nil {
 		s.logger.Error("fetching metric series", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

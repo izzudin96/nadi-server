@@ -134,6 +134,18 @@ func TestDashboardEndpoints(t *testing.T) {
 	}
 }
 
+func TestMetricSeriesRejectsInvalidRange(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	cookie := registerUser(t, srv, "range@example.com")
+
+	// to before from is rejected rather than silently returning nothing.
+	resp := getWithCookie(t, srv.URL,
+		"/api/devices/dev-1/metrics/cpu.usage_percent?from=2026-01-02T00:00:00Z&to=2026-01-01T00:00:00Z", cookie)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestDeviceManagement(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	cookie := registerUser(t, srv, "mgmt@example.com")

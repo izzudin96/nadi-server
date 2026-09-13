@@ -10,15 +10,27 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 
+const RANGES = [
+  { label: '1h', seconds: 3600 },
+  { label: '3h', seconds: 10800 },
+  { label: '6h', seconds: 21600 },
+  { label: '12h', seconds: 43200 },
+  { label: '1d', seconds: 86400 },
+  { label: '3d', seconds: 259200 },
+  { label: '7d', seconds: 604800 },
+  { label: '30d', seconds: 2592000 },
+]
+
 const route = useRoute()
 const router = useRouter()
 const deviceID = route.params.id as string
 
-// Charts poll their own series every 15s; this slower poll just picks up newly
+// Each chart polls its own series; this slower poll just picks up newly
 // reported metric names so their graphs appear without a reload.
 const LIST_REFRESH_MS = 30000
 
 const metrics = ref<LatestMetric[]>([])
+const rangeSeconds = ref(RANGES[0].seconds)
 const loading = ref(true)
 const error = ref('')
 let timer: number | undefined
@@ -42,6 +54,11 @@ async function loadLatest() {
     loading.value = false
   }
 }
+
+function rangeLabel(): string {
+  const r = RANGES.find((r) => r.seconds === rangeSeconds.value)
+  return r ? r.label : `${rangeSeconds.value / 3600}h`
+}
 </script>
 
 <template>
@@ -53,7 +70,19 @@ async function loadLatest() {
 
     <div class="mb-6">
       <h1 class="text-2xl font-semibold tracking-tight">{{ deviceID }}</h1>
-      <p class="text-muted-foreground mt-1 text-sm">Live metrics collected over the last hour.</p>
+      <p class="text-muted-foreground mt-1 text-sm">Live metrics, showing the last {{ rangeLabel() }}.</p>
+    </div>
+
+    <div class="mb-6 flex flex-wrap items-center gap-1">
+      <Button
+        v-for="r in RANGES"
+        :key="r.seconds"
+        size="sm"
+        :variant="rangeSeconds === r.seconds ? 'default' : 'outline'"
+        @click="rangeSeconds = r.seconds"
+      >
+        {{ r.label }}
+      </Button>
     </div>
 
     <Alert v-if="error" variant="destructive" class="mb-4">
@@ -72,6 +101,7 @@ async function loadLatest() {
         :device-id="deviceID"
         :metric-name="m.name"
         :unit="m.unit"
+        :range-seconds="rangeSeconds"
       />
     </div>
 

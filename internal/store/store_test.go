@@ -137,6 +137,52 @@ func TestPurgeMetrics(t *testing.T) {
 	}
 }
 
+func TestMetricSeriesBucketed(t *testing.T) {
+	pool := testdb.New(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	if err := s.CreateDevice(ctx, "dev-1", "hash"); err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Now().UTC().Truncate(time.Hour)
+	for i, v := range []float64{1, 2, 3} {
+		ts := base.Add(time.Duration(i) * 10 * time.Minute)
+		if err := s.InsertMetrics(ctx, "dev-1", []Metric{{Name: "cpu.usage_percent", Value: v}}, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	points, err := s.MetricSeriesBucketed(ctx, "dev-1", "cpu.usage_percent", base, base.Add(time.Hour), 10*time.Minute)
+	if err != nil {
+		t.Fatalf("MetricSeriesBucketed() error = %v", err)
+	}
+	if len(points) != 3 {
+		t.Fatalf("points = %d, want 3", len(points))
+	}
+	for i, v := range []float64{1, 2, 3} {
+		if points[i].Value != v {
+			t.Fatalf("points[%d].Value = %v, want %v", i, points[i].Value, v)
+		}
+	}
+
+	// Two samples in the same bucket average together.
+	if err := s.InsertMetrics(ctx, "dev-1", []Metric{{Name: "mem.used_bytes", Value: 100}}, base.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertMetrics(ctx, "dev-1", []Metric{{Name: "mem.used_bytes", Value: 200}}, base.Add(6*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	avg, err := s.MetricSeriesBucketed(ctx, "dev-1", "mem.used_bytes", base, base.Add(time.Hour), 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(avg) != 1 || avg[0].Value != 150 {
+		t.Fatalf("avg = %+v, want one point with value 150", avg)
+	}
+}
+
 func ExampleNew() {
 	fmt.Println("store.New wraps a *pgxpool.Pool")
 	// Output: store.New wraps a *pgxpool.Pool
