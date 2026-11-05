@@ -90,7 +90,7 @@ function render(points: Point[]) {
     {
       color: ['#4f46e5'],
       grid: { top: 8, right: 8, bottom: 24, left: 8 },
-      tooltip: { trigger: 'axis' },
+      tooltip: { trigger: 'axis', appendTo: 'body' },
       xAxis: {
         type: 'time',
         axisLine: { lineStyle: { color: 'rgba(120,120,120,0.3)' } },
